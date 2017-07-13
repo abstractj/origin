@@ -132,7 +132,7 @@ func (o *canIOptions) Complete(cmd *cobra.Command, f *clientcmd.Factory, args []
 
 	output := kcmdutil.GetFlagString(cmd, "output")
 	if len(output) > 0 {
-		printer, _, err := f.PrinterForCommand(cmd)
+		printer, err := f.PrinterForCommand(cmd, false, nil, printers.PrintOptions{})
 		if err != nil {
 			return err
 		}
@@ -229,9 +229,6 @@ func (o *canIOptions) listAllPermissions() error {
 
 		policyRules = whatCanYouDo.Status.Rules
 		rulesReviewResult = whatCanYouDo
-	}
-
-	if o.Printer != nil {
 		return o.Printer.PrintObj(rulesReviewResult, o.Out)
 	}
 
