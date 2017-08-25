@@ -98,7 +98,7 @@ type MasterConfig struct {
 	RuleResolver   rbacregistryvalidation.AuthorizationRuleResolver
 	Authenticator  authenticator.Request
 	Authorizer     kauthorizer.Authorizer
-	SubjectLocator authorizer.SubjectLocator
+	SubjectLocator rbacauthorizer.SubjectLocator
 
 	// TODO(sttts): replace AuthorizationAttributeBuilder with apiserverfilters.NewRequestAttributeGetter
 	AuthorizationAttributeBuilder authorizer.AuthorizationAttributeBuilder
@@ -218,9 +218,8 @@ func BuildMasterConfig(options configapi.MasterConfig, informers InformerAccess)
 	)
 
 	kubeAuthorizer, ruleResolver, kubeSubjectLocator := buildKubeAuth(informers.GetInternalKubeInformers().Rbac().InternalVersion())
-	authorizer, subjectLocator := newAuthorizer(
+	authorizer := newAuthorizer(
 		kubeAuthorizer,
-		kubeSubjectLocator,
 		informers.GetInternalKubeInformers().Rbac().InternalVersion().ClusterRoles().Lister(),
 		options.ProjectConfig.ProjectRequestMessage,
 	)
@@ -303,11 +302,11 @@ func BuildMasterConfig(options configapi.MasterConfig, informers InformerAccess)
 		RuleResolver:                  ruleResolver,
 		Authenticator:                 authenticator,
 		Authorizer:                    authorizer,
-		SubjectLocator:                subjectLocator,
+		SubjectLocator:                kubeSubjectLocator,
 		AuthorizationAttributeBuilder: newAuthorizationAttributeBuilder(requestContextMapper),
 
 		ProjectAuthorizationCache: newProjectAuthorizationCache(
-			subjectLocator,
+			kubeSubjectLocator,
 			informers.GetInternalKubeInformers().Core().InternalVersion().Namespaces().Informer(),
 			informers.GetInternalKubeInformers().Rbac().InternalVersion(),
 		),
@@ -750,7 +749,7 @@ func newAuthenticator(config configapi.MasterConfig, accessTokenGetter oauthclie
 	return group.NewAuthenticatedGroupAdder(union.NewFailOnError(topLevelAuthenticators...)), nil
 }
 
-func newProjectAuthorizationCache(subjectLocator authorizer.SubjectLocator, namespaces cache.SharedIndexInformer, internalRBACInformers rbacinformers.Interface) *projectauth.AuthorizationCache {
+func newProjectAuthorizationCache(subjectLocator rbacauthorizer.SubjectLocator, namespaces cache.SharedIndexInformer, internalRBACInformers rbacinformers.Interface) *projectauth.AuthorizationCache {
 	return projectauth.NewAuthorizationCache(
 		namespaces,
 		projectauth.NewAuthorizerReviewer(subjectLocator),
@@ -769,17 +768,16 @@ func buildKubeAuth(r rbacinformers.Interface) (kauthorizer.Authorizer, rbacregis
 	return kubeAuthorizer, ruleResolver, kubeSubjectLocator
 }
 
-func newAuthorizer(kubeAuthorizer kauthorizer.Authorizer, kubeSubjectLocator rbacauthorizer.SubjectLocator, clusterRoleGetter rbaclisters.ClusterRoleLister, projectRequestDenyMessage string) (kauthorizer.Authorizer, authorizer.SubjectLocator) {
+func newAuthorizer(kubeAuthorizer kauthorizer.Authorizer, clusterRoleGetter rbaclisters.ClusterRoleLister, projectRequestDenyMessage string) kauthorizer.Authorizer {
 	messageMaker := authorizer.NewForbiddenMessageResolver(projectRequestDenyMessage)
 	roleBasedAuthorizer := authorizer.NewAuthorizer(kubeAuthorizer, messageMaker)
-	subjectLocator := authorizer.NewSubjectLocator(kubeSubjectLocator)
 	scopeLimitedAuthorizer := scope.NewAuthorizer(roleBasedAuthorizer, clusterRoleGetter, messageMaker)
 
 	authorizer := authorizerunion.New(
 		authorizerfactory.NewPrivilegedGroups(user.SystemPrivilegedGroup), // authorizes system:masters to do anything, just like upstream
 		scopeLimitedAuthorizer)
 
-	return authorizer, subjectLocator
+	return authorizer
 }
 
 func newAuthorizationAttributeBuilder(requestContextMapper apirequest.RequestContextMapper) authorizer.AuthorizationAttributeBuilder {

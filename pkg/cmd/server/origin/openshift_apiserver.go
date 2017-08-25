@@ -26,10 +26,10 @@ import (
 	"k8s.io/kubernetes/pkg/client/retry"
 	kubeletclient "k8s.io/kubernetes/pkg/kubelet/client"
 	rbacregistryvalidation "k8s.io/kubernetes/pkg/registry/rbac/validation"
+	"k8s.io/kubernetes/plugin/pkg/auth/authorizer/rbac"
 
 	"github.com/openshift/origin/pkg/api"
 	"github.com/openshift/origin/pkg/api/v1"
-	"github.com/openshift/origin/pkg/authorization/authorizer"
 	authorizationinformer "github.com/openshift/origin/pkg/authorization/generated/informers/internalversion"
 	buildapiserver "github.com/openshift/origin/pkg/build/apiserver"
 	osclient "github.com/openshift/origin/pkg/client"
@@ -82,7 +82,7 @@ type OpenshiftAPIConfig struct {
 
 	// these are all required to build our storage
 	RuleResolver   rbacregistryvalidation.AuthorizationRuleResolver
-	SubjectLocator authorizer.SubjectLocator
+	SubjectLocator rbac.SubjectLocator
 	LimitVerifier  imageadmission.LimitVerifier
 	// RegistryHostnameRetriever retrieves the internal and external hostname of
 	// the integrated registry, or false if no such registry is available.
