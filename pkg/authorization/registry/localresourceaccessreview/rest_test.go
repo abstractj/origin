@@ -4,6 +4,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/util/diff"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -14,6 +15,9 @@ import (
 	authorizationapi "github.com/openshift/origin/pkg/authorization/apis/authorization"
 	"github.com/openshift/origin/pkg/authorization/registry/resourceaccessreview"
 	"github.com/openshift/origin/pkg/authorization/registry/util"
+	rbacauthorizer "k8s.io/kubernetes/plugin/pkg/auth/authorizer/rbac"
+	informers "k8s.io/kubernetes/pkg/client/informers/informers_generated/internalversion"
+	"k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/fake"
 )
 
 type resourceAccessTest struct {
@@ -64,6 +68,17 @@ func TestNoNamespace(t *testing.T) {
 
 func TestConflictingNamespace(t *testing.T) {
 	authorizer := &testAuthorizer{}
+
+	client := fake.NewSimpleClientset()
+	sharedInformers := informers.NewSharedInformerFactory(client, time.Minute)
+
+	//TODO
+	roles := &rbacauthorizer.RoleGetter{Lister: sharedInformers.Rbac().InternalVersion().Roles().Lister()}
+	roleBindings := &rbacauthorizer.RoleBindingLister{ Lister: sharedInformers.Rbac().InternalVersion().RoleBindings().Lister()}
+	clusterRoles := &rbacauthorizer.ClusterRoleGetter{Lister: sharedInformers.Rbac().InternalVersion().ClusterRoles().Lister()}
+	clusterRoleBindings := &rbacauthorizer.ClusterRoleBindingLister{Lister: sharedInformers.Rbac().InternalVersion().ClusterRoleBindings().Lister()}
+
+	subjectLocator := rbacauthorizer.NewSubjectAccessEvaluator(roles, roleBindings, clusterRoles, clusterRoleBindings, "")
 	reviewRequest := &authorizationapi.LocalResourceAccessReview{
 		Action: authorizationapi.Action{
 			Namespace: "foo",
@@ -72,7 +87,9 @@ func TestConflictingNamespace(t *testing.T) {
 		},
 	}
 
-	storage := NewREST(resourceaccessreview.NewRegistry(resourceaccessreview.NewREST(authorizer, authorizer)))
+
+
+	storage := NewREST(resourceaccessreview.NewRegistry(resourceaccessreview.NewREST(authorizer, subjectLocator)))
 	ctx := apirequest.WithNamespace(apirequest.NewContext(), "bar")
 	_, err := storage.Create(ctx, reviewRequest, false)
 	if err == nil {
@@ -120,7 +137,18 @@ func TestNoErrors(t *testing.T) {
 }
 
 func (r *resourceAccessTest) runTest(t *testing.T) {
-	storage := NewREST(resourceaccessreview.NewRegistry(resourceaccessreview.NewREST(r.authorizer, r.authorizer)))
+	client := fake.NewSimpleClientset()
+	sharedInformers := informers.NewSharedInformerFactory(client, time.Minute)
+
+	//TODO
+	roles := &rbacauthorizer.RoleGetter{Lister: sharedInformers.Rbac().InternalVersion().Roles().Lister()}
+	roleBindings := &rbacauthorizer.RoleBindingLister{ Lister: sharedInformers.Rbac().InternalVersion().RoleBindings().Lister()}
+	clusterRoles := &rbacauthorizer.ClusterRoleGetter{Lister: sharedInformers.Rbac().InternalVersion().ClusterRoles().Lister()}
+	clusterRoleBindings := &rbacauthorizer.ClusterRoleBindingLister{Lister: sharedInformers.Rbac().InternalVersion().ClusterRoleBindings().Lister()}
+
+	subjectLocator := rbacauthorizer.NewSubjectAccessEvaluator(roles, roleBindings, clusterRoles, clusterRoleBindings, "")
+
+	storage := NewREST(resourceaccessreview.NewRegistry(resourceaccessreview.NewREST(r.authorizer, subjectLocator)))
 
 	expectedResponse := &authorizationapi.ResourceAccessReviewResponse{
 		Namespace: r.reviewRequest.Action.Namespace,
