@@ -14,6 +14,25 @@ import (
 	authorizationapi "github.com/openshift/origin/pkg/authorization/apis/authorization"
 	"github.com/openshift/origin/pkg/authorization/registry/resourceaccessreview"
 	"github.com/openshift/origin/pkg/authorization/registry/util"
+	"github.com/openshift/origin/pkg/quota/controller/clusterquotamapping"
+	"github.com/openshift/origin/pkg/util/restoptions"
+	"github.com/openshift/origin/pkg/cmd/server/origin"
+	"time"
+	"k8s.io/apiserver/pkg/storage/storagebackend"
+	fakeinternal "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset/fake"
+	kinternalinformers "k8s.io/kubernetes/pkg/client/informers/informers_generated/internalversion"
+	authorizationinformer "github.com/openshift/origin/pkg/authorization/generated/informers/internalversion"
+	authorizationclientfake "github.com/openshift/origin/pkg/authorization/generated/internalclientset/fake"
+	quotainformer "github.com/openshift/origin/pkg/quota/generated/informers/internalversion"
+	quotaclientfake "github.com/openshift/origin/pkg/quota/generated/internalclientset/fake"
+	securityinformer "github.com/openshift/origin/pkg/security/generated/informers/internalversion"
+	securityclientfake "github.com/openshift/origin/pkg/security/generated/internalclientset/fake"
+	sccstorage "github.com/openshift/origin/pkg/security/registry/securitycontextconstraints/etcd"
+	apiserver "k8s.io/apiserver/pkg/server"
+	restclient "k8s.io/client-go/rest"
+	kclientsetexternal "k8s.io/kubernetes/pkg/client/clientset_generated/clientset"
+	kclientsetinternal "k8s.io/kubernetes/pkg/client/clientset_generated/internalclientset"
+	kubeletclient "k8s.io/kubernetes/pkg/kubelet/client"
 )
 
 type resourceAccessTest struct {
@@ -64,6 +83,7 @@ func TestNoNamespace(t *testing.T) {
 
 func TestConflictingNamespace(t *testing.T) {
 	authorizer := &testAuthorizer{}
+	config := fakeOpenshiftAPIServerConfig()
 	reviewRequest := &authorizationapi.LocalResourceAccessReview{
 		Action: authorizationapi.Action{
 			Namespace: "foo",
@@ -72,7 +92,7 @@ func TestConflictingNamespace(t *testing.T) {
 		},
 	}
 
-	storage := NewREST(resourceaccessreview.NewRegistry(resourceaccessreview.NewREST(authorizer, authorizer)))
+	storage := NewREST(resourceaccessreview.NewRegistry(resourceaccessreview.NewREST(authorizer, config.SubjectLocator)))
 	ctx := apirequest.WithNamespace(apirequest.NewContext(), "bar")
 	_, err := storage.Create(ctx, reviewRequest, false)
 	if err == nil {
@@ -120,7 +140,8 @@ func TestNoErrors(t *testing.T) {
 }
 
 func (r *resourceAccessTest) runTest(t *testing.T) {
-	storage := NewREST(resourceaccessreview.NewRegistry(resourceaccessreview.NewREST(r.authorizer, r.authorizer)))
+	config := fakeOpenshiftAPIServerConfig()
+	storage := NewREST(resourceaccessreview.NewRegistry(resourceaccessreview.NewREST(r.authorizer, config.SubjectLocator)))
 
 	expectedResponse := &authorizationapi.ResourceAccessReviewResponse{
 		Namespace: r.reviewRequest.Action.Namespace,
@@ -162,4 +183,33 @@ func (r *resourceAccessTest) runTest(t *testing.T) {
 	if !reflect.DeepEqual(expectedAttributes, r.authorizer.actualAttributes) {
 		t.Errorf("diff %v", diff.ObjectGoPrintDiff(expectedAttributes, r.authorizer.actualAttributes))
 	}
+}
+
+
+func fakeOpenshiftAPIServerConfig() *origin.OpenshiftAPIConfig {
+	internalkubeInformerFactory := kinternalinformers.NewSharedInformerFactory(fakeinternal.NewSimpleClientset(), 1*time.Second)
+	authorizationInformerFactory := authorizationinformer.NewSharedInformerFactory(authorizationclientfake.NewSimpleClientset(), 0)
+	quotaInformerFactory := quotainformer.NewSharedInformerFactory(quotaclientfake.NewSimpleClientset(), 0)
+	securityInformerFactory := securityinformer.NewSharedInformerFactory(securityclientfake.NewSimpleClientset(), 0)
+	restOptionsGetter := restoptions.NewSimpleGetter(&storagebackend.Config{ServerList: []string{"localhost"}})
+	sccStorage := sccstorage.NewREST(restOptionsGetter)
+
+	ret := &origin.OpenshiftAPIConfig{
+		GenericConfig: &apiserver.Config{
+			LoopbackClientConfig: &restclient.Config{},
+			RESTOptionsGetter:    restOptionsGetter,
+		},
+
+		KubeClientExternal:            &kclientsetexternal.Clientset{},
+		KubeClientInternal:            &kclientsetinternal.Clientset{},
+		KubeletClientConfig:           &kubeletclient.KubeletClientConfig{},
+		KubeInternalInformers:         internalkubeInformerFactory,
+		AuthorizationInformers:        authorizationInformerFactory,
+		QuotaInformers:                quotaInformerFactory,
+		SecurityInformers:             securityInformerFactory,
+		SCCStorage:                    sccStorage,
+		EnableBuilds:                  true,
+		ClusterQuotaMappingController: clusterquotamapping.NewClusterQuotaMappingControllerInternal(internalkubeInformerFactory.Core().InternalVersion().Namespaces(), quotaInformerFactory.Quota().InternalVersion().ClusterResourceQuotas()),
+	}
+	return ret
 }
