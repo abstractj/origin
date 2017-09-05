@@ -10,6 +10,7 @@ import (
 	"k8s.io/apiserver/pkg/authentication/user"
 	kauthorizer "k8s.io/apiserver/pkg/authorization/authorizer"
 	apirequest "k8s.io/apiserver/pkg/endpoints/request"
+	"k8s.io/kubernetes/pkg/apis/rbac"
 
 	authorizationapi "github.com/openshift/origin/pkg/authorization/apis/authorization"
 	"github.com/openshift/origin/pkg/authorization/registry/resourceaccessreview"
@@ -19,6 +20,13 @@ import (
 type resourceAccessTest struct {
 	authorizer    *testAuthorizer
 	reviewRequest *authorizationapi.LocalResourceAccessReview
+}
+
+//TODO look at this
+type testSubjectLocator struct {
+	actualAttributes kauthorizer.Attributes
+	subjects []rbac.Subject
+	err    string
 }
 
 type testAuthorizer struct {
@@ -37,12 +45,10 @@ func (a *testAuthorizer) Authorize(attributes kauthorizer.Attributes) (allowed b
 
 	return false, "", errors.New("Unsupported")
 }
-func (a *testAuthorizer) GetAllowedSubjects(passedAttributes kauthorizer.Attributes) (sets.String, sets.String, error) {
+func (a *testSubjectLocator) AllowedSubjects(passedAttributes kauthorizer.Attributes) ([]rbac.Subject, error) {
 	a.actualAttributes = passedAttributes
-	if len(a.err) == 0 {
-		return a.users, a.groups, nil
-	}
-	return a.users, a.groups, errors.New(a.err)
+
+	return nil, nil
 }
 
 func TestNoNamespace(t *testing.T) {
@@ -64,6 +70,7 @@ func TestNoNamespace(t *testing.T) {
 
 func TestConflictingNamespace(t *testing.T) {
 	authorizer := &testAuthorizer{}
+	subjectLocator := &testSubjectLocator{}
 	reviewRequest := &authorizationapi.LocalResourceAccessReview{
 		Action: authorizationapi.Action{
 			Namespace: "foo",
@@ -72,7 +79,7 @@ func TestConflictingNamespace(t *testing.T) {
 		},
 	}
 
-	storage := NewREST(resourceaccessreview.NewRegistry(resourceaccessreview.NewREST(authorizer, authorizer)))
+	storage := NewREST(resourceaccessreview.NewRegistry(resourceaccessreview.NewREST(authorizer, subjectLocator)))
 	ctx := apirequest.WithNamespace(apirequest.NewContext(), "bar")
 	_, err := storage.Create(ctx, reviewRequest, false)
 	if err == nil {
@@ -120,7 +127,8 @@ func TestNoErrors(t *testing.T) {
 }
 
 func (r *resourceAccessTest) runTest(t *testing.T) {
-	storage := NewREST(resourceaccessreview.NewRegistry(resourceaccessreview.NewREST(r.authorizer, r.authorizer)))
+	subjectLocator := &testSubjectLocator{}
+	storage := NewREST(resourceaccessreview.NewRegistry(resourceaccessreview.NewREST(r.authorizer, subjectLocator)))
 
 	expectedResponse := &authorizationapi.ResourceAccessReviewResponse{
 		Namespace: r.reviewRequest.Action.Namespace,
