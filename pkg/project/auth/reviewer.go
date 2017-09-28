@@ -3,9 +3,10 @@ package auth
 import (
 	kauthorizer "k8s.io/apiserver/pkg/authorization/authorizer"
 	kapi "k8s.io/kubernetes/pkg/api"
+	rbacauthorizer "k8s.io/kubernetes/plugin/pkg/auth/authorizer/rbac"
+	"github.com/openshift/origin/pkg/authorization/registry/util"
 
 	authorizationapi "github.com/openshift/origin/pkg/authorization/apis/authorization"
-	"github.com/openshift/origin/pkg/authorization/authorizer"
 	"github.com/openshift/origin/pkg/client"
 )
 
@@ -93,10 +94,10 @@ func (r *reviewer) Review(name string) (Review, error) {
 }
 
 type authorizerReviewer struct {
-	policyChecker authorizer.SubjectLocator
+	policyChecker rbacauthorizer.SubjectLocator
 }
 
-func NewAuthorizerReviewer(policyChecker authorizer.SubjectLocator) Reviewer {
+func NewAuthorizerReviewer(policyChecker rbacauthorizer.SubjectLocator) Reviewer {
 	return &authorizerReviewer{policyChecker: policyChecker}
 }
 
@@ -109,7 +110,9 @@ func (r *authorizerReviewer) Review(namespaceName string) (Review, error) {
 		ResourceRequest: true,
 	}
 
-	users, groups, err := r.policyChecker.GetAllowedSubjects(attributes)
+	subjects, err := r.policyChecker.AllowedSubjects(attributes)
+	users, groups := util.GetAllowedSubjects(namespaceName, subjects)
+
 	review := &defaultReview{
 		users:  users.List(),
 		groups: groups.List(),
